@@ -1,0 +1,191 @@
+---
+title: "NLP- text mining"
+author: "Tak Au"
+date: "January 7, 2018"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+### Summary  
+In this report, I'll use the Tidytext package to process the text files and create the n-gram models.  
+  
+The assigned dataset contains text files in various languages, we'll use the three English files: blogs, news and twitters.      
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+```
+
+
+```{r}
+library(rJava)
+library(magrittr)
+library(tidyverse)
+library(tidytext)
+```
+  
+### Files summary   
+  
+```{r}
+filenames <- Sys.glob("final/en_US/*.txt")
+suppressWarnings(texts <- filenames %>%
+        lapply((function(x){readLines(x, encoding = "UTF-8")})))
+
+filesize_MB<- filenames %>%
+        sapply(file.size) /1048576 
+        
+
+line_counts <- texts %>%
+        sapply(length)
+        
+
+max_char_counts_line <- texts %>%
+        sapply(function(x){max(nchar(x))}) 
+
+data_info <- data.frame(filesize_MB, line_counts, max_char_counts_line)
+
+data_info
+```
+----  
+The size of the blogs file is 200MB, has 899288 lines and the longest line has 40833 characters.  
+The size of the news file is 196MB, has 77259 lines and the longest line has 5760 characters.  
+The size if the twitter file is 159MB, has 2360148 lines and the longest line has 140 characters.  
+  
+  
+### Clean files and Create tibbles
+Using functions, I can remove elements such as numbers, urls and symbols in one go.  
+
+```{r}
+# functions
+removeNumPunct <- function(x) gsub("[^[:alpha:][:space:]]*", "", x)
+removeURL <- function(x) gsub("http[[:alnum:][:punct:]]*", "", x) 
+removeHashTags <- function(x) gsub("#\\S+", "", x)
+removeTwitterHandles <- function(x) gsub("@\\S+", "", x)
+
+clean_text <- texts %>%
+        sapply(removeNumPunct) %>%
+        sapply(removeURL) %>%
+        sapply(removeHashTags) %>%
+        sapply(removeTwitterHandles)
+
+```
+  
+Tibble is a simple version of dataframe. It converts each single line of the files to a seperate row.
+```{r}
+tb_blogs <- as_tibble(clean_text[[1]])
+tb_news <- as_tibble(clean_text[[2]])
+tb_tweets <- as_tibble(clean_text[[3]])
+```
+  
+### Tokenize the tibbles 
+
+Converting each unique word to a token, when tokenize the words, the Tidytext package will turn each unique word to a uni-gram and display it in an individual row with the count of that word in the tibble. By default, Tidytext will remove punctuations, white space and turn words in lower case during tokenization.
+```{r}
+#function
+tidy_set <- function(x) {x %>%
+                unnest_tokens(word, value) %>%
+                count(word, sort = TRUE)}
+
+tb_blogs <- tidy_set(tb_blogs)
+tb_news <- tidy_set(tb_news)
+tb_tweets <- tidy_set(tb_tweets)
+``` 
+  
+The chart below displays the sizes, unique word counts and total word counts of each dataset.  
+  
+We are keeping the stop-words in for the reason that stop-words are the scaffolding of the English gammer. When we want to predict how a person writes English, we must include the stop-words.  
+  
+```{r}
+tb_names <- c("tb_blogs", "tb_news", "tb_tweets")
+Unique_Word_count <- c(397157, 88276, 478940)
+Total_word_count <- c(3684590, 2573348, 29354523)
+
+tb_size <- function(x) {paste0(object.size(x)/1048576, "MB")}
+paste("tb_blogs", tb_size(tb_blogs))
+paste("tb_news", tb_size(tb_news))
+paste("tb_tweets", tb_size(tb_tweets))
+data.frame(tb_names, Unique_Word_count, Total_word_count)
+```
+  
+### Calculate word frequency  
+  
+One measure of how important a word may be is its term frequency (tf), how frequently a word occurs in a document.    
+  
+```{r}
+#function
+word_freq <- function(x, y) {x %>% 
+                mutate(doc = y) %>%
+                mutate(total = sum(n)) %>%
+                mutate(tf = n / total) %>%
+                mutate(rank = row_number())
+} 
+
+blogs_word_freq <- word_freq(tb_blogs, "blogs")
+news_word_freq <- word_freq(tb_news, "news")
+tweets_word_freq <- word_freq(tb_tweets, "tweets")
+```
+  
+We will see how frequency of words are distributed in our files in the following frequency charts.  
+  
+```{r}
+# function
+freq_plot <- function(x, y) {
+        ggplot(x, aes(rank, tf, color = "green")) +
+                geom_line(size = 1.1, show.legend = FALSE) + 
+                scale_x_log10() + scale_y_log10() +
+                ggtitle(y)
+} 
+freq_plot(blogs_word_freq, "blogs")
+
+```
+
+```{r}
+freq_plot(news_word_freq, "news")
+```
+
+```{r}
+freq_plot(tweets_word_freq, "tweets")
+```
+  
+It's not a surprise that stop-words are amongst the highest frequency words.  
+  
+### Findings
+  
+These three files cover various sophistication in writing, they make a good mix for prediction.  
+There are still much non word tokens, especially of low frequency words, that require further investigation
+```{r}
+tail(tweets_word_freq)
+```
+  
+### Next  
+  
+The next step would be generating bi-gram(two words composition) and tri-gram(three words composition) models.  
+Calculate the trem frequency.  
+
+```{r}
+bi_gram <- function(x) {x %>% 
+                unnest_tokens(bigram, value, token = "ngrams", n = 2)} %>%
+                count(bigram, sort = TRUE) %>%
+                mutate(total = sum(n)) %>%
+                mutate(tf = n / total)
+                
+ng_news <- as_tibble(clean_text[[2]])
+bi_gram(ng_news)
+```
+
+```{r}
+tri_gram <- function(x) {x %>% 
+                unnest_tokens(trigram, value, token = "ngrams", n = 3)} %>%
+                count(trigram, sort = TRUE) %>%
+                mutate(total = sum(n)) %>%
+                mutate(tf = n / total)
+tri_gram(ng_news)
+```
+  
+### The way forward
+  
+That's what I can do at the moment. I'd need to know more before I can work out the algorithm to complete this project, so, to be continued.
+
+### General Infomation
+```{r}
+sessionInfo()
+```
